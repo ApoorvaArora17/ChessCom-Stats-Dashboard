@@ -37,6 +37,7 @@ def load_base_data():
     """Loads the base raw CSV game data."""
     return pd.read_csv('all_games.csv')            
 
+@st.cache_data
 def load_available_players():
     """ Loads a list of all available players """
     return pd.read_csv('available_players.csv')
@@ -55,7 +56,7 @@ available_players = load_available_players()
 all_players = available_players['username'].tolist()
 
 # User Selection Input
-selected_user = st.sidebar.selectbox("🎯 Select Friend to Analyze:", all_players)
+selected_user = st.sidebar.selectbox("🎯 Select Player to Analyze:", all_players)
 
 st.sidebar.markdown("### Global Filters")
 show_all_games = st.sidebar.checkbox("Include Variants & Daily Games", value=False)
@@ -83,6 +84,14 @@ if not player_df_full.empty:
 else:
     player_df = player_df_full.copy()
 
+if not player_df.empty:
+    available_controls = ['All Controls'] + sorted(player_df['time_control'].dropna().unique().tolist())
+    selected_control = st.sidebar.selectbox("Select Time Control:", available_controls)
+
+    if selected_control != 'All Controls':
+        player_df = player_df[player_df['time_control'] == selected_control]
+    else:
+        pass
 
 # -------------------------------------------------------------
 # 4. MAIN DASHBOARD RENDER
@@ -94,33 +103,57 @@ else:
     st.markdown(f"Analyzing **{len(player_df)}** games filtered down from the master logs.")
     st.markdown("---")
 
-    # ---- LAYER 1: HEADLINE METRICS ----
+# ---- LAYER 1: HEADLINE METRICS ----
     total_games = len(player_df)
     wins = len(player_df[player_df['outcome'] == 'Win'])
     losses = len(player_df[player_df['outcome'] == 'Loss'])
     draws = len(player_df[player_df['outcome'] == 'Draw'])
     win_rate = (wins / total_games) * 100 if total_games > 0 else 0
     
+    # --- TIME CALCULATIONS ---
+    # Change 'game_duration_seconds' below if your CSV uses a different column name
+    time_col = 'game_duration_seconds'
+    
+    if time_col in player_df.columns:
+        total_seconds = player_df[time_col].sum()
+        avg_seconds = player_df[time_col].mean() if total_games > 0 else 0
+        
+        total_hours = total_seconds / 3600
+        
+        # Format average time into neat minutes and seconds string
+        avg_minutes = int(avg_seconds // 60)
+        avg_remaining_seconds = int(avg_seconds % 60)
+        avg_time_str = f"{avg_minutes}m {avg_remaining_seconds}s" if total_games > 0 else "0m 0s"
+    else:
+        # Fallback values if the time column doesn't exist in your schema yet
+        total_hours = 0.0
+        avg_time_str = "N/A"
+
     # Check if a singular time class format is active
     is_singular_format = 'selected_format' in locals() and selected_format != 'All Formats'
 
     if is_singular_format:
-        # Calculate Elo metrics cleanly for a single format pool
         current_rating = int(player_df.sort_values(by='start_datetime', ascending=False)['player_rating'].iloc[0])
         peak_rating = int(player_df['player_rating'].max())
 
-        # Render 4 columns with Elo data included
+        # Layout Option A: 3 columns over 2 rows for a clean data grid
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Games Played", total_games)
+        col2.metric("Win Rate", f"{win_rate:.1f}%")
+        col3.metric("Total Time Invested", f"{total_hours:.1f} Hours")
+        
+        col4, col5, col6 = st.columns(3)
+        col4.metric(f"Current {selected_format.title()} Elo", current_rating)
+        col5.metric(f"Peak {selected_format.title()} Elo", peak_rating)
+        col6.metric("Avg. Game Duration", avg_time_str)
+    else:
+        # Layout Option B: Clean 4-column row layout when tracking aggregate streams
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
         m_col1.metric("Total Games Played", total_games)
-        m_col2.metric("Win Rate", f"{win_rate:.1f}%")
-        m_col3.metric(f"Current {selected_format.title()} Elo", current_rating)
-        m_col4.metric(f"Peak {selected_format.title()} Elo", peak_rating)
-    else:
-        # Render only 2 clean columns for overall summary when multiple formats are mixed
-        m_col1, m_col2 = st.columns(2)
-        m_col1.metric("Total Games Played (All Formats)", total_games)
-        m_col2.metric("Overall Combined Win Rate", f"{win_rate:.1f}%")
-    
+        m_col2.metric("Combined Win Rate", f"{win_rate:.1f}%")
+        m_col3.metric("Total Time Invested", f"{total_hours:.1f} Hours")
+        m_col4.metric("Avg. Game Duration", avg_time_str)
+        
     st.markdown("---")
 
     # ---- LAYER 2: CORE VISUALIZATIONS ----
